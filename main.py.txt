@@ -1,0 +1,62 @@
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+import requests
+from datetime import datetime
+
+# Inicialización de la API de NexApp
+app = FastAPI(title="NexApp Intelligence Unit API", version="1.0.0")
+
+# Configuración estricta de CORS para permitir que tu React/Vercel se conecte
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # En producción, aquí pondrás tu link de Vercel
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Credenciales y Endpoints
+CMF_TOKEN = "9e79bf38461c5d4dbc597d81926d97b05022f45f"
+BASE_URL = "https://api.cmfchile.cl/api-sbifv3/recursos_api"
+
+@app.post("/api/estado_situacion")
+def get_estado_situacion(rut: str, anio: str = "2025", mes: str = "12"):
+    """
+    Motor de extracción fundamental estocástica desde la CMF.
+    """
+    # Limpieza corporativa del RUT
+    clean_rut = rut.replace(".", "").strip()
+    if not clean_rut:
+        raise HTTPException(status_code=400, detail="RUT no proporcionado.")
+        
+    url = f"{BASE_URL}/balances/{anio}/{mes}/instituciones/{clean_rut}"
+    params = {"apikey": CMF_TOKEN, "formato": "json"}
+    
+    try:
+        # Petición a la CMF
+        response = requests.get(url, params=params)
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=f"Fallo en la extracción. Código CMF: {response.status_code}")
+            
+        cmf_data = response.json()
+        
+        # Mapeo de la estructura contable (Ajustado para bancos por defecto)
+        institucion = cmf_data.get("Archivo", {}).get("Instituciones", {})
+        
+        datos_limpios = {
+            "identificador": clean_rut,
+            "periodo": f"{anio}-{mes}",
+            "activos_totales": institucion.get("ActivosTotales", "N/A"),
+            "pasivos_totales": institucion.get("PasivosTotales", "N/A"),
+            "patrimonio": institucion.get("Patrimonio", "N/A")
+        }
+        
+        return {
+            "status": "success",
+            "auditoria_origen": "Comisión para el Mercado Financiero (Chile)",
+            "timestamp": datetime.now().isoformat(),
+            "fundamental_data": datos_limpios,
+            "raw_cmf": cmf_data
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
