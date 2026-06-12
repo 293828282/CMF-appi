@@ -2,8 +2,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import requests
 
-# Inicialización de NexApp Intelligence Unit v2.1.0
-app = FastAPI(title="NexApp Intelligence Unit API", version="2.1.0")
+# Inicialización de NexApp Intelligence Unit v2.0.0
+app = FastAPI(title="NexApp Intelligence Unit API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -32,8 +32,8 @@ TICKER_MAP = {
 @app.get("/api/fundamental/{ticker}/{anio}/{mes}")
 def get_balance_completo(ticker: str, anio: str, mes: str):
     """
-    Motor Dinámico de Extracción Total (v2.1).
-    Captura el libro mayor completo, adaptándose a las inconsistencias de nomenclatura de la CMF.
+    Motor Dinámico de Extracción Total.
+    Permite consultar cualquier periodo y devuelve el catálogo completo de cuentas.
     """
     upper_ticker = ticker.upper().strip()
     identificador = TICKER_MAP.get(upper_ticker)
@@ -51,6 +51,7 @@ def get_balance_completo(ticker: str, anio: str, mes: str):
     try:
         response = requests.get(url, params=params)
         
+        # Filtro de seguridad si la entidad no existe en ese periodo o es FECU
         if response.status_code == 404:
              return {
                 "status": "warning",
@@ -59,31 +60,23 @@ def get_balance_completo(ticker: str, anio: str, mes: str):
                 "detail": "Sin datos. La entidad reporta en FECU o el periodo consultado aún no ha sido publicado por la CMF."
             }
 
+        # Captura del error exacto de CMF
         if response.status_code != 200:
             cmf_error = response.json().get("Mensaje", "Error desconocido") if "json" in response.headers.get("content-type", "") else "Error de conexión"
             raise HTTPException(status_code=response.status_code, detail=f"Rechazo CMF: {cmf_error}")
             
         cmf_data = response.json()
         
-        # EXTRACCIÓN INTELIGENTE: Busca ambas nomenclaturas posibles de la CMF
-        archivo = cmf_data.get("Archivo", {})
-        
-        # Algunas veces la CMF lo manda directo en la raíz, otras dentro de "Archivo"
-        if "CodigosBalances" in cmf_data:
-            cuentas_totales = cmf_data["CodigosBalances"]
-        elif "balances" in archivo:
-            cuentas_totales = archivo["balances"]
-        elif "CodigosBalances" in archivo:
-            cuentas_totales = archivo["CodigosBalances"]
-        else:
-            cuentas_totales = [] # Si cambian el formato de nuevo, no se cae la API
+        # Extracción pura del arreglo de cuentas
+        cuentas_totales = cmf_data.get("Archivo", {}).get("balances", [])
         
         return {
             "status": "success",
             "ticker": upper_ticker,
             "periodo": f"{anio}-{mes}",
             "total_cuentas_extraidas": len(cuentas_totales),
-            "libro_mayor": cuentas_totales
+            "libro_mayor": cuentas_totales,
+            "raw_cmf_data": cmf_data # Respaldamos la data cruda por seguridad
         }
         
     except HTTPException:
