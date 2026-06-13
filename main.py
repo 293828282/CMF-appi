@@ -2,8 +2,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import requests
 
-# Inicialización de NexApp Intelligence Unit v2.0.0
-app = FastAPI(title="NexApp Intelligence Unit API", version="2.0.0")
+# Inicialización de NexApp Intelligence Unit v2.0.1 (Estabilizada)
+app = FastAPI(title="NexApp Intelligence Unit API", version="2.0.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -32,20 +32,24 @@ TICKER_MAP = {
 @app.get("/api/fundamental/{ticker}/{anio}/{mes}")
 def get_balance_completo(ticker: str, anio: str, mes: str):
     """
-    Motor Dinámico de Extracción Total.
+    Motor Dinámico de Extracción Total (Estabilizado).
     Permite consultar cualquier periodo y devuelve el catálogo completo de cuentas.
     """
-    upper_ticker = ticker.upper().strip()
+    # Limpieza a prueba de balas (quita espacios y puntos accidentales de la URL)
+    upper_ticker = ticker.upper().strip().strip(".")
+    clean_anio = anio.strip().strip(".")
+    clean_mes = mes.strip().strip(".")
+    
     identificador = TICKER_MAP.get(upper_ticker)
     
     if not identificador:
         raise HTTPException(
             status_code=404, 
-            detail=f"Ticker '{ticker}' no encontrado en la base de datos."
+            detail=f"Ticker '{upper_ticker}' no encontrado en la base de datos."
         )
         
     clean_id = identificador.replace(".", "").strip()
-    url = f"{BASE_URL_SBIF}/balances/{anio}/{mes}/instituciones/{clean_id}"
+    url = f"{BASE_URL_SBIF}/balances/{clean_anio}/{clean_mes}/instituciones/{clean_id}"
     params = {"apikey": CMF_TOKEN, "formato": "json"}
     
     try:
@@ -56,7 +60,7 @@ def get_balance_completo(ticker: str, anio: str, mes: str):
              return {
                 "status": "warning",
                 "ticker": upper_ticker,
-                "periodo": f"{anio}-{mes}",
+                "periodo": f"{clean_anio}-{clean_mes}",
                 "detail": "Sin datos. La entidad reporta en FECU o el periodo consultado aún no ha sido publicado por la CMF."
             }
 
@@ -67,13 +71,16 @@ def get_balance_completo(ticker: str, anio: str, mes: str):
             
         cmf_data = response.json()
         
-        # Extracción pura del arreglo de cuentas
-        cuentas_totales = cmf_data.get("Archivo", {}).get("balances", [])
+        # Extracción inteligente: se adapta a la nomenclatura de la CMF
+        if "CodigosBalances" in cmf_data:
+            cuentas_totales = cmf_data["CodigosBalances"]
+        else:
+            cuentas_totales = cmf_data.get("Archivo", {}).get("balances", [])
         
         return {
             "status": "success",
             "ticker": upper_ticker,
-            "periodo": f"{anio}-{mes}",
+            "periodo": f"{clean_anio}-{clean_mes}",
             "total_cuentas_extraidas": len(cuentas_totales),
             "libro_mayor": cuentas_totales,
             "raw_cmf_data": cmf_data # Respaldamos la data cruda por seguridad
